@@ -20,6 +20,11 @@
     "deepwiki": {
       "type": "http",
       "url": "https://mcp.deepwiki.com/mcp"
+    },
+    "pdf-to-markdown": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--project", "src/PdfToMarkdown"]
     }
   }
 }

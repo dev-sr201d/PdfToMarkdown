@@ -1,0 +1,6 @@
+# Test project analyzer overrides
+[*.cs]
+
+# CA1707: Identifiers should not contain underscores
+# Test method naming convention uses underscores: MethodName_Condition_ExpectedResult
+dotnet_diagnostic.CA1707.severity = none
