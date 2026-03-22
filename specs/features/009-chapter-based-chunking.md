@@ -13,9 +13,9 @@ FRD-009
 When the user enables the chunking option, the system must split the converted Markdown content at top-level heading boundaries and write each chapter as a separate numbered file. This allows long documents to be decomposed into manageable sections.
 
 ## Inputs
-- Converted Markdown content with heading structure (as produced by the conversion pipeline, FRD-003 through FRD-007).
 - The `chunkByChapter` flag (set to `true` to enable chunking).
 - The source PDF path (used to determine output directory and base filename).
+- Converted Markdown content provided incrementally during the parsing/conversion pass (FRD-003), including heading-level information needed to identify chapter boundaries.
 
 ## Outputs
 - Multiple Markdown files, one per chapter, written to the same directory as the source PDF.
@@ -46,8 +46,9 @@ When the user enables the chunking option, the system must split the converted M
 - [ ] The confirmation message lists all chunk file paths.
 
 ## Dependencies
+- **FRD-003** (PDF Parsing & Direct Markdown Conversion) — chapter boundaries (top-level headings) are identified during the parsing/conversion pass.
 - **FRD-004** (Heading Conversion) — provides the heading structure used to identify chapter boundaries.
-- **FRD-008** (File Output Management) — handles the actual file writing.
+- **FRD-008** (File Output Management) — handles the actual file writing, including switching to a new output file when a chapter boundary is encountered during incremental writing.
 
 ## Notes
 - Chapter boundaries are defined exclusively by top-level headings (`#` / H1). Sub-headings (`##`, `###`, etc.) do not create new chunks.

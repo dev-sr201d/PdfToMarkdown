@@ -24,7 +24,7 @@
     "pdf-to-markdown": {
       "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "src/PdfToMarkdown"]
+      "args": ["${workspaceFolder}/src/PdfToMarkdown/bin/Release/net9.0/PdfToMarkdown.dll"]
     }
   }
 }

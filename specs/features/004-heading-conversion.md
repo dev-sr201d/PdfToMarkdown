@@ -12,7 +12,7 @@ FRD-004
 The system must detect heading elements in the parsed PDF content and map them to the appropriate Markdown heading levels. Headings are the primary structural backbone of the output document and are also used as chapter boundaries by the chunking feature (FRD-009).
 
 ## Inputs
-- Parsed PDF content with font metadata (size, weight) as produced by FRD-003.
+- PDF content with font metadata (size, weight) as extracted during the parsing/conversion pass (FRD-003).
 
 ## Outputs
 - Markdown heading syntax (`#`, `##`, `###`, etc.) corresponding to the hierarchical heading levels detected in the PDF.
@@ -38,7 +38,7 @@ The system must detect heading elements in the parsed PDF content and map them t
 - [ ] At least 6 heading levels are supported.
 
 ## Dependencies
-- **FRD-003** (PDF Parsing & Content Extraction) — requires font metadata and structural tags from the parser.
+- **FRD-003** (PDF Parsing & Direct Markdown Conversion) — heading conversion rules are applied during the parsing/conversion pass using font metadata extracted from the PDF.
 
 ## Downstream Dependents
 - **FRD-009** (Chapter-Based Chunking) — uses top-level headings as chapter boundaries.

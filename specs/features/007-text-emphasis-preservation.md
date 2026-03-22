@@ -12,7 +12,7 @@ FRD-007
 The system must detect bold and italic formatting in the parsed PDF content and apply the corresponding Markdown emphasis syntax. This applies to text in all contexts — body paragraphs, list items, table cells, and any other content area.
 
 ## Inputs
-- Parsed PDF content with font metadata (weight, style) for each text segment as produced by FRD-003.
+- PDF content with font metadata (weight, style) for each text segment as extracted during the parsing/conversion pass (FRD-003).
 
 ## Outputs
 - Markdown emphasis syntax applied to the appropriate text spans:
@@ -40,7 +40,7 @@ The system must detect bold and italic formatting in the parsed PDF content and 
 - [ ] A PDF with no emphasized text produces a valid Markdown document with no spurious emphasis markers.
 
 ## Dependencies
-- **FRD-003** (PDF Parsing & Content Extraction) — requires font weight and style metadata from the parser.
+- **FRD-003** (PDF Parsing & Direct Markdown Conversion) — emphasis rules are applied during the parsing/conversion pass using font weight and style metadata.
 
 ## Notes
 - Determining whether text is "bold" vs. "regular heading weight" may require context-aware logic. The specific heuristic is an implementation concern; this FRD requires only that the result is correct for well-structured PDFs.

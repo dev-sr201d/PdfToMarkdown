@@ -49,7 +49,7 @@ The system must validate all inputs before processing and provide clear, actiona
 
 ## Dependencies
 - **FRD-002** (PDF Conversion Tool Interface) — validation runs as the first step in the tool pipeline.
-- **FRD-003** (PDF Parsing) — some errors (encrypted, no text) are detected during parsing.
+- **FRD-003** (PDF Parsing & Direct Markdown Conversion) — some errors (encrypted, no text) are detected during the parsing/conversion pass.
 - **FRD-008** (File Output Management) — write errors are detected during file output.
 
 ## Notes

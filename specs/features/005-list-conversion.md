@@ -12,7 +12,7 @@ FRD-005
 The system must detect bulleted and numbered lists in the parsed PDF content and convert them to the corresponding Markdown list syntax, preserving item order, nesting levels, and list type (ordered vs. unordered).
 
 ## Inputs
-- Parsed PDF content with structural groupings and text content as produced by FRD-003.
+- PDF content with structural groupings and text content as extracted during the parsing/conversion pass (FRD-003).
 
 ## Outputs
 - Markdown unordered list items using `- ` prefix for bulleted lists.
@@ -39,7 +39,7 @@ The system must detect bulleted and numbered lists in the parsed PDF content and
 - [ ] A PDF with no lists produces a valid Markdown document with no spurious list items.
 
 ## Dependencies
-- **FRD-003** (PDF Parsing & Content Extraction) — requires structural groupings and text content from the parser.
+- **FRD-003** (PDF Parsing & Direct Markdown Conversion) — list conversion rules are applied during the parsing/conversion pass using structural groupings and text content.
 
 ## Notes
 - List detection heuristics are an implementation concern. This FRD requires correct results for well-structured PDFs with identifiable list patterns.

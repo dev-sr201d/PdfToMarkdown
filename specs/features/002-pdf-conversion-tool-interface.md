@@ -23,9 +23,8 @@ The MCP server must expose a tool callable from Copilot Chat that accepts a PDF 
 2. Each parameter must have a human-readable description so that the LLM can understand how to use the tool.
 3. The tool must accept a `pdfPath` parameter representing an absolute path to a PDF file on the local file system.
 4. The tool must accept an optional `chunkByChapter` boolean parameter (default: `false`).
-5. The tool must orchestrate the conversion pipeline: validate input → parse PDF (or load existing parsed model) → convert to Markdown → write output.
-6. If a `.parsed.json` file already exists for the given PDF, the tool should load the document model from disk instead of re-parsing, unless the PDF has been modified since the last parse.
-7. On success, the tool must return a text message confirming the file path(s) written (e.g., `"Converted: C:\docs\report.md"`).
+5. The tool must orchestrate the conversion pipeline: validate input → parse PDF and convert directly to Markdown → write output incrementally.
+6. On success, the tool must return a text message confirming the file path(s) written (e.g., `"Converted: C:\docs\report.md"`).
 7. On failure, the tool must return an actionable error message (see FRD-010).
 8. The tool must support cancellation — if the client cancels the request, the operation should stop promptly.
 
@@ -47,3 +46,4 @@ The MCP server must expose a tool callable from Copilot Chat that accepts a PDF 
 ## Notes
 - The tool is a thin orchestration layer — all business logic resides in service components defined by other FRDs.
 - The tool does not return converted content in the response; it writes files to disk and returns only a confirmation.
+- There is no intermediate `.parsed.json` file. Parsing and Markdown conversion happen in a single operation.

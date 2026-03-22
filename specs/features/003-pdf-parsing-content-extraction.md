@@ -1,4 +1,4 @@
-# Feature: PDF Parsing & Content Extraction
+# Feature: PDF Parsing & Direct Markdown Conversion
 
 ## Feature ID
 FRD-003
@@ -9,78 +9,77 @@ FRD-003
 - **Constraint**: Conversion quality depends on the structural quality of the source PDF.
 
 ## Description
-The system must be able to read a text-based PDF file and extract its structured content — including text runs with formatting metadata, structural elements (headings, lists, tables), and reading order. This extracted content serves as the intermediate representation consumed by all downstream conversion features (FRD-004 through FRD-007).
+The system must read a text-based PDF file, extract its content, and convert it directly to Markdown during parsing — without constructing a separate intermediate document model. Because PDFs store content in render order rather than logical reading order, the system must reconstruct reading order through spatial analysis — grouping words into lines, partitioning lines into spatially cohesive blocks, and sorting blocks for correct reading order (including multi-column layouts). The system must then classify block-level elements (headings, paragraphs, lists, tables) within each spatial block and emit the corresponding Markdown syntax. Converted Markdown content must be written to disk incrementally on a page-by-page basis rather than accumulated entirely in memory before writing.
+
+This feature encompasses content extraction, spatial analysis, and Markdown conversion in a two-pass pipeline (pre-analysis followed by conversion). The conversion rules for specific element types — headings (FRD-004), lists (FRD-005), tables (FRD-006), and emphasis (FRD-007) — still apply and must be respected during this direct conversion.
 
 ## Inputs
 - An absolute local file system path to a valid, readable, text-based PDF file.
 
 ## Outputs
-- A **document model** — a structured, hierarchical representation of the PDF's content. The model must be:
-  - **Typed**: each element has a defined kind (e.g., heading, paragraph, list, list item, table, table row, table cell, text segment).
-  - **Hierarchical**: elements are organized in a tree — document → pages → blocks (headings, paragraphs, lists, tables) → inline segments (text runs with formatting).
-  - **Serializable**: the entire model must be serializable to a human-readable file format (e.g., JSON) so it can be persisted to disk and deserialized later.
-
-  The model must preserve:
-  - Text content in reading order.
-  - Font metadata (size, weight, style) associated with each text segment.
-  - Element type classification (heading, paragraph, list item, table cell, etc.).
-  - Nesting relationships (e.g., list items within a list, cells within a row within a table).
-  - Heading level, where detected (either from structural tags or font-size heuristics).
-  - Page boundaries (for context, though not directly represented in Markdown output).
+- Markdown content written incrementally to the output file(s) as pages are processed. The system does not produce an intermediate data structure or file — it writes Markdown directly.
 
 ## Functional Requirements
 
-### Parsing
-1. The parser must open and read PDF files from the local file system.
-2. The parser must extract text content in the correct reading order as defined by the PDF structure.
-3. The parser must extract font metadata (size, weight/bold, style/italic) for each text segment so that downstream features can identify headings and emphasis.
-4. The parser must identify structural groupings such as paragraphs, list items, and table cells where the PDF structure provides this information.
-5. The parser must classify each block-level element by type (heading, paragraph, list, table) in the document model.
-6. The parser must handle multi-page PDFs, processing all pages sequentially.
-7. The parser must support cancellation — long-running parsing operations should respect the cancellation signal from the caller.
-8. The parser must not attempt OCR or image-based text extraction — only machine-readable text layers are supported.
-9. The parser must raise clear errors when:
+### Parsing & Direct Conversion
+1. The system must open and read PDF files from the local file system.
+2. The system must reconstruct the correct reading order from the spatial positions of text on each page. PDF content streams do not guarantee logical reading order, so the system must use spatial analysis rather than relying on the raw content stream order.
+3. The system must extract font metadata (size, weight/bold, style/italic) for each text segment to support heading detection and emphasis preservation.
+4. The system must identify structural groupings such as paragraphs, list items, and table cells where the PDF structure provides this information.
+5. The system must classify each block-level element by type (heading, paragraph, list, table) and emit the corresponding Markdown syntax directly during parsing.
+6. The system must handle multi-page PDFs, processing all pages sequentially.
+7. The system must support cancellation — long-running operations should respect the cancellation signal from the caller.
+8. The system must not attempt OCR or image-based text extraction — only machine-readable text layers are supported.
+9. The system must raise clear errors when:
    - The file cannot be opened or read.
    - The PDF is encrypted or password-protected.
    - The PDF contains no extractable text content.
 
-### Document Model Format
-10. The document model must use a defined set of element types so that downstream features can process elements by type (e.g., iterate over all headings, all tables, etc.).
-11. Each text segment in the model must carry its font metadata (size, weight, style) so that emphasis and heading detection can be performed downstream.
-12. The model must be serializable to a human-readable format (JSON) and deserializable back to the same in-memory representation without data loss.
+### Spatial Block Discovery
+10. On each page, the system must group extracted words into text lines based on vertical proximity.
+11. The system must partition text lines into spatially cohesive blocks — groups of lines that are vertically close and share significant horizontal overlap. Each block represents a logical region of content (e.g., a column, a heading, a paragraph cluster).
+12. The system must detect multi-column layouts by identifying consistent horizontal gap positions that recur across many lines. Only gaps with strong support (appearing in a significant proportion of multi-word lines) qualify as column boundaries — incidental gaps (such as table cell spacing) must not be treated as column splits.
+13. Lines must be split into segments only at detected column boundaries. Gaps that do not align with column boundaries must be preserved intact so that table cell spacing and other intra-line structure are not disrupted.
+14. The system must calculate gap thresholds adaptively from the page's inter-word spacing distribution rather than using fixed thresholds alone.
+15. The system must sort spatial blocks for correct reading order. In multi-column layouts, full-width blocks (spanning more than 60% of page width) act as section separators; between separators, column blocks are read left-to-right, top-to-bottom.
+16. Element classification (headings, paragraphs, lists, tables) must operate within each spatial block independently, preserving the block's reading order.
 
-### Persistence
-13. After parsing, the system must persist the document model to disk as a JSON file alongside the source PDF, using the same base filename with a `.parsed.json` extension (e.g., `report.pdf` → `report.parsed.json`).
-14. When a `.parsed.json` file already exists for a given PDF, the system must support loading the model from disk instead of re-parsing the PDF.
-15. The persisted file must be overwritten on each new parse operation.
-16. Downstream conversion features (FRD-004 through FRD-007) must consume the document model — either from the in-memory representation or by loading the persisted file.
+### Incremental Output
+17. The system must write converted Markdown content to disk incrementally as pages are processed, rather than accumulating the entire document's Markdown content in memory before writing.
+18. The system must not require holding the full converted output of the document in memory at any point during processing.
+19. Each page's converted content must be flushed to the output file before proceeding to the next page.
+
+### Pre-analysis
+20. If determining heading levels or other structural properties requires knowledge of the full document (e.g., identifying the most common font size across all pages), the system may perform an initial read pass over the document to gather this information before the conversion pass begins.
+21. The pre-analysis pass must only collect metadata needed for accurate conversion — it must not extract or store the full text content of the document.
 
 ## Acceptance Criteria
-- [ ] A well-structured text-based PDF is parsed and all text content is extracted in the correct reading order.
-- [ ] Font metadata (size, bold, italic) is accurately associated with corresponding text segments.
-- [ ] Structural elements (paragraphs, lists, tables) are identified where the PDF provides structural information.
-- [ ] Each block-level element is classified by type (heading, paragraph, list, table) in the document model.
-- [ ] Multi-page PDFs are fully parsed across all pages.
-- [ ] The document model can be serialized to JSON and deserialized back without data loss.
-- [ ] Parsing a PDF produces a `.parsed.json` file alongside the source PDF.
-- [ ] When a `.parsed.json` file exists, the system can load the model from disk without re-parsing.
+- [ ] A well-structured text-based PDF is parsed and converted directly to Markdown without producing an intermediate data structure or file.
+- [ ] Font metadata (size, bold, italic) is used to correctly identify headings and emphasis during conversion.
+- [ ] Structural elements (paragraphs, lists, tables) are identified and converted to Markdown where the PDF provides structural information.
+- [ ] Each block-level element is classified by type and emitted as the corresponding Markdown syntax.
+- [ ] Multi-column PDF layouts are correctly handled — content from each column is read in the correct order (left-to-right, top-to-bottom within each column).
+- [ ] Spatial block discovery partitions page content into cohesive blocks based on vertical proximity and horizontal overlap.
+- [ ] Column boundaries are detected adaptively and only gaps with strong cross-line support are treated as column splits — table cell spacing and incidental gaps are preserved.
+- [ ] Multi-page PDFs are fully processed across all pages.
+- [ ] Markdown content is written to disk incrementally — not accumulated entirely in memory before writing.
 - [ ] A PDF with no extractable text content produces a clear, descriptive error — not an empty output or crash.
 - [ ] An encrypted or password-protected PDF produces a clear error message.
-- [ ] Cancellation is respected and stops parsing promptly without resource leaks.
+- [ ] Cancellation is respected and stops processing promptly without resource leaks.
 
 ## Dependencies
 - None (this is a foundational service feature).
 
 ## Downstream Dependents
-- **FRD-004** (Heading Conversion) — depends on font size/weight metadata.
-- **FRD-005** (List Conversion) — depends on structural list groupings.
-- **FRD-006** (Table Conversion) — depends on structural table/cell groupings.
-- **FRD-007** (Text Emphasis Preservation) — depends on font weight/style metadata.
+- **FRD-004** (Heading Conversion) — heading conversion rules applied during parsing.
+- **FRD-005** (List Conversion) — list conversion rules applied during parsing.
+- **FRD-006** (Table Conversion) — table conversion rules applied during parsing.
+- **FRD-007** (Text Emphasis Preservation) — emphasis rules applied during parsing.
 
 ## Notes
-- This feature covers extraction and the intermediate document model — transformation to Markdown syntax is handled by FRD-004 through FRD-007.
-- The document model is the central contract of the system. All downstream features depend on its structure. Changes to the model affect all conversion features.
-- Persisting the model to `.parsed.json` decouples parsing from conversion, enabling re-conversion (e.g., with different chunking options) without re-parsing.
-- The persisted JSON file is also useful for debugging and inspecting what the parser extracted.
+- There is no separate intermediate document model or JSON persistence. Parsing and Markdown conversion are a single unified operation.
+- The conversion rules defined in FRD-004 through FRD-007 describe WHAT the Markdown output must look like for each element type. Those rules are applied inline during the parsing/conversion pass — not as a separate transformation step.
+- Spatial block discovery is the foundational mechanism that enables correct reading order reconstruction, multi-column support, and per-block element classification. It replaces reliance on the PDF content stream order, which is not guaranteed to match logical reading order.
+- The spatial block algorithm uses adaptive thresholds derived from each page's actual word spacing distribution. Column boundaries require strong statistical support (recurring across many lines) to avoid false positives from table cell gaps or justified text spacing.
 - The quality of output is bounded by the structural quality of the input PDF. Poorly-structured PDFs may yield incomplete structural information, which is acceptable per PRD constraints.
 - Only text-based PDFs are in scope. Scanned-image PDFs are explicitly out of scope per the PRD.
