@@ -410,4 +410,81 @@ public class PdfMarkdownConverterTests : IDisposable
         allContent.Should().Contain("# Chapter Overview");
         allContent.Should().Contain("# Key Principles");
     }
+
+    [Fact]
+    public async Task ConvertAsync_ThreeColumnPdf_OutputsColumnsInOrder()
+    {
+        // Arrange
+        string path = Path.Combine(_tempDir, "three-column.pdf");
+        IMarkdownWriter writer = Substitute.For<IMarkdownWriter>();
+        List<string> pages = [];
+        writer.WritePageAsync(Arg.Do<string>(s => pages.Add(s)), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _sut.ConvertAsync(path, writer);
+
+        // Assert — all three columns should be present and in left-to-right order
+        string allContent = string.Join("", pages);
+        int col1Pos = allContent.IndexOf("Col1 line 1", StringComparison.Ordinal);
+        int col2Pos = allContent.IndexOf("Col2 line 1", StringComparison.Ordinal);
+        int col3Pos = allContent.IndexOf("Col3 line 1", StringComparison.Ordinal);
+
+        col1Pos.Should().BeGreaterThanOrEqualTo(0, "column 1 should be present");
+        col2Pos.Should().BeGreaterThanOrEqualTo(0, "column 2 should be present");
+        col3Pos.Should().BeGreaterThanOrEqualTo(0, "column 3 should be present");
+        col1Pos.Should().BeLessThan(col2Pos, "column 1 should appear before column 2");
+        col2Pos.Should().BeLessThan(col3Pos, "column 2 should appear before column 3");
+    }
+
+    [Fact]
+    public async Task ConvertAsync_ThreeColumnPdf_EachColumnIsContiguous()
+    {
+        // Arrange
+        string path = Path.Combine(_tempDir, "three-column.pdf");
+        IMarkdownWriter writer = Substitute.For<IMarkdownWriter>();
+        List<string> pages = [];
+        writer.WritePageAsync(Arg.Do<string>(s => pages.Add(s)), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _sut.ConvertAsync(path, writer);
+
+        // Assert — all col1 lines should precede all col2 lines
+        string allContent = string.Join("", pages);
+        int lastCol1 = allContent.LastIndexOf("Col1 line 10", StringComparison.Ordinal);
+        int firstCol2 = allContent.IndexOf("Col2 line 1", StringComparison.Ordinal);
+        int lastCol2 = allContent.LastIndexOf("Col2 line 10", StringComparison.Ordinal);
+        int firstCol3 = allContent.IndexOf("Col3 line 1", StringComparison.Ordinal);
+
+        lastCol1.Should().BeLessThan(firstCol2, "all col1 lines should precede col2");
+        lastCol2.Should().BeLessThan(firstCol3, "all col2 lines should precede col3");
+    }
+
+    [Fact]
+    public async Task ConvertAsync_TwoColumnNarrowGap_DetectsColumnsCorrectly()
+    {
+        // Arrange
+        string path = Path.Combine(_tempDir, "two-column-narrow-gap.pdf");
+        IMarkdownWriter writer = Substitute.For<IMarkdownWriter>();
+        List<string> pages = [];
+        writer.WritePageAsync(Arg.Do<string>(s => pages.Add(s)), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _sut.ConvertAsync(path, writer);
+
+        // Assert — left column content should appear before right column content
+        string allContent = string.Join("", pages);
+        int leftPos = allContent.IndexOf("Left col line 1", StringComparison.Ordinal);
+        int rightPos = allContent.IndexOf("Right col line 1", StringComparison.Ordinal);
+
+        leftPos.Should().BeGreaterThanOrEqualTo(0, "left column should be present");
+        rightPos.Should().BeGreaterThanOrEqualTo(0, "right column should be present");
+        leftPos.Should().BeLessThan(rightPos, "left column should appear before right column");
+
+        // All left column lines should be contiguous (before any right column line)
+        int lastLeft = allContent.LastIndexOf("Left col line 12", StringComparison.Ordinal);
+        lastLeft.Should().BeLessThan(rightPos, "all left column lines should precede right column");
+    }
 }

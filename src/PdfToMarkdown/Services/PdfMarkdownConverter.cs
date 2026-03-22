@@ -131,11 +131,12 @@ internal sealed partial class PdfMarkdownConverter(ILogger<PdfMarkdownConverter>
                     hasAnyText = true;
                 }
 
-                // Spatial block analysis: split lines into segments, cluster into blocks,
-                // then sort blocks for correct reading order (handles columns, headings, etc.)
-                double adaptiveGap = CalculateAdaptiveColumnGap(rawLines);
-                List<TextBlock> blocks = BuildSpatialBlocks(rawLines, adaptiveGap);
-                blocks = SortBlocksForReadingOrder(blocks);
+                // Spatial block analysis: detect page layout (1/2/3 columns),
+                // split lines by column regions, cluster into blocks,
+                // then sort blocks for correct reading order.
+                ColumnLayout layout = DetectPageLayout(rawLines);
+                List<TextBlock> blocks = BuildSpatialBlocks(rawLines, layout);
+                blocks = SortBlocksForReadingOrder(blocks, layout);
 
                 if (blocks.Count > 1)
                 {
@@ -757,7 +758,12 @@ internal sealed partial class PdfMarkdownConverter(ILogger<PdfMarkdownConverter>
         {
             double y = Math.Round(allWords[i].BoundingBox.Bottom, 1);
 
-            if (Math.Abs(currentLine.Y - y) > 2.0)
+            // Use font-size-relative tolerance: at large font sizes, glyph
+            // descender depth differences can exceed the base 2pt threshold.
+            double fontSize = allWords[i].Letters.Count > 0 ? allWords[i].Letters[0].FontSize : 12.0;
+            double yTolerance = Math.Max(2.0, fontSize * 0.15);
+
+            if (Math.Abs(currentLine.Y - y) > yTolerance)
             {
                 currentLine = new TextLine(y);
                 lines.Add(currentLine);
@@ -770,27 +776,23 @@ internal sealed partial class PdfMarkdownConverter(ILogger<PdfMarkdownConverter>
     }
 
     /// <summary>
-    /// Builds spatial text blocks from page lines by splitting lines at horizontal gaps
-    /// and clustering spatially close segments based on vertical proximity and horizontal overlap.
+    /// Builds spatial text blocks from page lines by splitting lines according to
+    /// the detected page layout (column regions) and clustering spatially close
+    /// segments based on vertical proximity and horizontal overlap.
     /// This naturally handles multi-column layouts, heading isolation, and paragraph separation.
     /// </summary>
-    private static List<TextBlock> BuildSpatialBlocks(List<TextLine> rawLines, double horizontalGapThreshold)
+    private static List<TextBlock> BuildSpatialBlocks(List<TextLine> rawLines, ColumnLayout layout)
     {
         if (rawLines.Count == 0)
         {
             return [];
         }
 
-        // 1. Detect consistent column boundaries — gaps at the same X position
-        //    across many lines indicate column structure; table cell gaps which
-        //    appear in only a few rows are ignored.
-        List<double> columnBoundaries = DetectConsistentColumnBoundaries(rawLines, horizontalGapThreshold);
-
-        // 2. Split each line into segments only at detected column boundaries
+        // 1. Split each line into segments based on detected column regions
         List<TextLine> segments = [];
         foreach (TextLine line in rawLines)
         {
-            segments.AddRange(SplitLineAtColumnBoundaries(line, horizontalGapThreshold, columnBoundaries));
+            segments.AddRange(SplitLineByLayout(line, layout));
         }
 
         // 3. Calculate typical line spacing for vertical gap threshold
@@ -836,133 +838,268 @@ internal sealed partial class PdfMarkdownConverter(ILogger<PdfMarkdownConverter>
     }
 
     /// <summary>
-    /// Detects consistent column boundaries by finding horizontal gap positions
-    /// that appear across many lines. Only gap clusters with enough support
-    /// are treated as real column structure — this prevents table cell gaps
-    /// or incidental spacing from being misidentified as columns.
+    /// Detects the page layout (1, 2, or 3 columns) by analyzing the horizontal
+    /// distribution of text across the page. Builds a coverage histogram to find
+    /// vertical whitespace strips that indicate column boundaries. This top-down
+    /// approach is more robust than gap-based detection because it identifies the
+    /// overall structure rather than relying on individual inter-word spacing.
     /// </summary>
-    private static List<double> DetectConsistentColumnBoundaries(List<TextLine> lines, double gapThreshold)
+    private static ColumnLayout DetectPageLayout(List<TextLine> lines)
     {
         if (lines.Count < 4)
         {
-            return [];
+            return ColumnLayout.SingleColumn;
         }
 
-        List<double> allGapCenters = [];
-        int linesWithMultipleWords = 0;
+        // Determine page extents from all words
+        double pageLeft = double.MaxValue;
+        double pageRight = double.MinValue;
 
         foreach (TextLine line in lines)
         {
-            if (line.Words.Count < 2)
+            foreach (Word word in line.Words)
             {
-                continue;
+                pageLeft = Math.Min(pageLeft, word.BoundingBox.Left);
+                pageRight = Math.Max(pageRight, word.BoundingBox.Right);
+            }
+        }
+
+        double pageWidth = pageRight - pageLeft;
+        if (pageWidth < 100)
+        {
+            return ColumnLayout.SingleColumn;
+        }
+
+        // Build coverage histogram: for each 1pt bin, count how many lines have text there.
+        // In a multi-column layout, the gap between columns will have near-zero coverage.
+        int binCount = (int)Math.Ceiling(pageWidth) + 1;
+        int[] coverage = new int[binCount];
+
+        foreach (TextLine line in lines)
+        {
+            // Track which bins this line covers (union of all word extents)
+            HashSet<int> lineBins = [];
+            foreach (Word word in line.Words)
+            {
+                int startBin = Math.Max(0, (int)(word.BoundingBox.Left - pageLeft));
+                int endBin = Math.Min(binCount - 1, (int)(word.BoundingBox.Right - pageLeft));
+                for (int b = startBin; b <= endBin; b++)
+                {
+                    lineBins.Add(b);
+                }
             }
 
-            linesWithMultipleWords++;
-
-            for (int w = 1; w < line.Words.Count; w++)
+            foreach (int bin in lineBins)
             {
-                double gap = line.Words[w].BoundingBox.Left - line.Words[w - 1].BoundingBox.Right;
-                if (gap > gapThreshold)
+                coverage[bin]++;
+            }
+        }
+
+        // Find valleys: consecutive bins where coverage is very low.
+        // A real column gap will have nearly zero text coverage across most lines.
+        double coverageThreshold = Math.Max(3, lines.Count * 0.10);
+
+        // Don't look at the very edges of the page (first/last 8% of width)
+        int edgeMargin = Math.Max(5, (int)(binCount * 0.08));
+
+        List<(int Start, int End, int MinCoverage)> gaps = [];
+        int gapStart = -1;
+
+        for (int b = edgeMargin; b < binCount - edgeMargin; b++)
+        {
+            if (coverage[b] < coverageThreshold)
+            {
+                if (gapStart < 0)
                 {
-                    double gapCenter = (line.Words[w - 1].BoundingBox.Right + line.Words[w].BoundingBox.Left) / 2.0;
-                    allGapCenters.Add(gapCenter);
+                    gapStart = b;
+                }
+            }
+            else
+            {
+                if (gapStart >= 0)
+                {
+                    int minCov = int.MaxValue;
+                    for (int g = gapStart; g < b; g++)
+                    {
+                        minCov = Math.Min(minCov, coverage[g]);
+                    }
+
+                    gaps.Add((gapStart, b - 1, minCov));
+                    gapStart = -1;
                 }
             }
         }
 
-        if (allGapCenters.Count == 0 || linesWithMultipleWords < 4)
+        if (gapStart >= 0)
         {
-            return [];
+            int end = binCount - edgeMargin - 1;
+            int minCov = int.MaxValue;
+            for (int g = gapStart; g <= end; g++)
+            {
+                minCov = Math.Min(minCov, coverage[g]);
+            }
+
+            gaps.Add((gapStart, end, minCov));
         }
 
-        // Cluster gap centers that are close together
-        allGapCenters.Sort();
-        List<List<double>> clusters = [];
-        List<double> currentCluster = [allGapCenters[0]];
+        // Filter: gaps must be at least 5pt wide to be real column separators
+        gaps = gaps.Where(g => (g.End - g.Start + 1) >= 5).ToList();
 
-        for (int i = 1; i < allGapCenters.Count; i++)
+        if (gaps.Count == 0)
         {
-            if (allGapCenters[i] - currentCluster[^1] <= ColumnAlignmentTolerance)
-            {
-                currentCluster.Add(allGapCenters[i]);
-            }
-            else
-            {
-                clusters.Add(currentCluster);
-                currentCluster = [allGapCenters[i]];
-            }
+            return ColumnLayout.SingleColumn;
         }
 
-        clusters.Add(currentCluster);
-
-        // Require strong support: at least 8 lines or 30% of multi-word lines,
-        // whichever is larger. This avoids treating table cell gaps as column boundaries.
-        double threshold = Math.Max(8, linesWithMultipleWords * 0.30);
-        List<double> boundaries = [];
-
-        foreach (List<double> cluster in clusters)
+        // Validate: a real column gap must have substantial text on BOTH sides.
+        // Two checks:
+        // 1. Peak coverage on each side must be significant (catches cases where
+        //    no text at all exists on one side, e.g. single-column left-aligned).
+        // 2. A significant proportion of lines must have text on each side
+        //    (catches cases where only a few wide headings extend past body text).
+        gaps = gaps.Where(gap =>
         {
-            if (cluster.Count >= threshold)
+            // Check 1: peak bin coverage on each side
+            int leftMaxCov = 0;
+            for (int b = edgeMargin; b < gap.Start; b++)
             {
-                boundaries.Add(cluster.Average());
+                leftMaxCov = Math.Max(leftMaxCov, coverage[b]);
             }
+
+            int rightMaxCov = 0;
+            for (int b = gap.End + 1; b < binCount - edgeMargin; b++)
+            {
+                rightMaxCov = Math.Max(rightMaxCov, coverage[b]);
+            }
+
+            double minPeakCoverage = lines.Count * 0.20;
+            if (leftMaxCov < minPeakCoverage || rightMaxCov < minPeakCoverage)
+            {
+                return false;
+            }
+
+            // Check 2: count lines with text on each side
+            int leftLineCount = 0;
+            int rightLineCount = 0;
+
+            foreach (TextLine line in lines)
+            {
+                double lineMaxX = double.MinValue;
+                double lineMinX = double.MaxValue;
+                foreach (Word word in line.Words)
+                {
+                    lineMinX = Math.Min(lineMinX, word.BoundingBox.Left - pageLeft);
+                    lineMaxX = Math.Max(lineMaxX, word.BoundingBox.Right - pageLeft);
+                }
+
+                if (lineMinX < gap.Start)
+                {
+                    leftLineCount++;
+                }
+
+                if (lineMaxX > gap.End)
+                {
+                    rightLineCount++;
+                }
+            }
+
+            double minLineCount = lines.Count * 0.35;
+            return leftLineCount >= minLineCount && rightLineCount >= minLineCount;
+        }).ToList();
+
+        if (gaps.Count == 0)
+        {
+            return ColumnLayout.SingleColumn;
         }
 
-        boundaries.Sort();
-        return boundaries;
+        // Sort by quality: prefer gaps with lower coverage, then wider gaps
+        gaps.Sort((a, b) =>
+        {
+            int covCompare = a.MinCoverage.CompareTo(b.MinCoverage);
+            return covCompare != 0 ? covCompare : (b.End - b.Start).CompareTo(a.End - a.Start);
+        });
+
+        // Take up to 2 best gaps (for up to 3 columns)
+        List<(int Start, int End)> selectedGaps = gaps
+            .Take(2)
+            .Select(g => (g.Start, g.End))
+            .OrderBy(g => g.Start)
+            .ToList();
+
+        // Build column boundaries (center of each gap) and regions
+        List<double> boundaries = selectedGaps
+            .Select(g => pageLeft + (g.Start + g.End) / 2.0)
+            .ToList();
+
+        List<(double Left, double Right)> regions = [];
+        double currentLeft = pageLeft;
+        foreach (var gap in selectedGaps)
+        {
+            regions.Add((currentLeft, pageLeft + gap.Start));
+            currentLeft = pageLeft + gap.End + 1;
+        }
+
+        regions.Add((currentLeft, pageRight));
+
+        return new ColumnLayout
+        {
+            ColumnCount = regions.Count,
+            Boundaries = boundaries,
+            ColumnRegions = regions
+        };
     }
 
     /// <summary>
-    /// Splits a line into segments only at gaps that align with detected column boundaries.
-    /// Gaps that don't align with column boundaries (e.g., table cell gaps) are preserved.
+    /// Splits a line into separate segments based on the detected column layout.
+    /// Words are assigned to columns by their horizontal center position.
+    /// Lines that only span one column are returned as-is.
     /// </summary>
-    private static List<TextLine> SplitLineAtColumnBoundaries(TextLine line, double gapThreshold, List<double> columnBoundaries)
+    private static List<TextLine> SplitLineByLayout(TextLine line, ColumnLayout layout)
     {
-        if (line.Words.Count < 2 || columnBoundaries.Count == 0)
+        if (layout.ColumnCount <= 1 || layout.Boundaries.Count == 0 || line.Words.Count < 2)
         {
             return [line];
         }
 
         List<Word> sorted = [.. line.Words.OrderBy(w => w.BoundingBox.Left)];
-        List<int> splitPoints = [];
 
-        for (int i = 1; i < sorted.Count; i++)
+        // Assign each word to a column region by its horizontal center
+        Dictionary<int, List<Word>> wordsByColumn = [];
+        foreach (Word word in sorted)
         {
-            double gap = sorted[i].BoundingBox.Left - sorted[i - 1].BoundingBox.Right;
-            if (gap > gapThreshold)
+            double wordCenter = (word.BoundingBox.Left + word.BoundingBox.Right) / 2.0;
+            int col = 0;
+            for (int b = 0; b < layout.Boundaries.Count; b++)
             {
-                double gapCenter = (sorted[i - 1].BoundingBox.Right + sorted[i].BoundingBox.Left) / 2.0;
-
-                // Only split if this gap aligns with a known column boundary
-                if (columnBoundaries.Any(b => Math.Abs(gapCenter - b) <= ColumnAlignmentTolerance * 2))
+                if (wordCenter > layout.Boundaries[b])
                 {
-                    splitPoints.Add(i);
+                    col = b + 1;
                 }
             }
+
+            if (!wordsByColumn.TryGetValue(col, out List<Word>? colWords))
+            {
+                colWords = [];
+                wordsByColumn[col] = colWords;
+            }
+
+            colWords.Add(word);
         }
 
-        if (splitPoints.Count == 0)
+        if (wordsByColumn.Count <= 1)
         {
             return [line];
         }
 
-        List<TextLine> segments = [];
-        int start = 0;
-
-        foreach (int splitAt in splitPoints)
-        {
-            TextLine segment = new(line.Y);
-            segment.Words.AddRange(sorted.GetRange(start, splitAt - start));
-            segments.Add(segment);
-            start = splitAt;
-        }
-
-        TextLine lastSegment = new(line.Y);
-        lastSegment.Words.AddRange(sorted.GetRange(start, sorted.Count - start));
-        segments.Add(lastSegment);
-
-        return segments;
+        // Create separate TextLines for each column
+        return wordsByColumn
+            .OrderBy(kv => kv.Key)
+            .Select(kv =>
+            {
+                TextLine segment = new(line.Y);
+                segment.Words.AddRange(kv.Value);
+                return segment;
+            })
+            .ToList();
     }
 
     /// <summary>
@@ -1015,76 +1152,81 @@ internal sealed partial class PdfMarkdownConverter(ILogger<PdfMarkdownConverter>
     }
 
     /// <summary>
-    /// Sorts spatial blocks for correct reading order. Full-width blocks act as
-    /// separators; between them, column blocks are read left column top-to-bottom,
-    /// then right column top-to-bottom.
+    /// Sorts spatial blocks for correct reading order using the detected column layout.
+    /// Full-width blocks act as separators; between them, column blocks are read
+    /// left-to-right, each column top-to-bottom.
     /// </summary>
-    private static List<TextBlock> SortBlocksForReadingOrder(List<TextBlock> blocks)
+    private static List<TextBlock> SortBlocksForReadingOrder(List<TextBlock> blocks, ColumnLayout layout)
     {
         if (blocks.Count <= 1)
         {
             return blocks;
         }
 
-        double pageLeft = blocks.Min(b => b.MinX);
-        double pageRight = blocks.Max(b => b.MaxX);
-        double pageWidth = pageRight - pageLeft;
-        double pageMid = (pageLeft + pageRight) / 2.0;
-
-        // Check if there's a column structure: at least some narrow blocks
-        // on each side of the midpoint
-        bool hasLeftColumn = blocks.Any(b => (b.MaxX - b.MinX) < pageWidth * 0.6 && (b.MinX + b.MaxX) / 2.0 < pageMid);
-        bool hasRightColumn = blocks.Any(b => (b.MaxX - b.MinX) < pageWidth * 0.6 && (b.MinX + b.MaxX) / 2.0 >= pageMid);
-
-        if (!hasLeftColumn || !hasRightColumn)
+        if (layout.ColumnCount <= 1)
         {
             // No column structure — simple top-to-bottom sort
             return [.. blocks.OrderByDescending(b => b.MaxY)];
         }
 
+        double pageLeft = blocks.Min(b => b.MinX);
+        double pageRight = blocks.Max(b => b.MaxX);
+        double pageWidth = pageRight - pageLeft;
+
         // Multi-column layout: process top-to-bottom, accumulate column blocks,
-        // flush left-then-right when a full-width block or Y gap appears
+        // flush columns left-to-right when a full-width block appears
         List<TextBlock> allSorted = [.. blocks.OrderByDescending(b => b.MaxY)];
         List<TextBlock> result = [];
-        List<TextBlock> leftBatch = [];
-        List<TextBlock> rightBatch = [];
+        List<List<TextBlock>> columnBatches = [];
+        for (int c = 0; c < layout.ColumnCount; c++)
+        {
+            columnBatches.Add([]);
+        }
 
         foreach (TextBlock block in allSorted)
         {
             double blockWidth = block.MaxX - block.MinX;
-            double centerX = (block.MinX + block.MaxX) / 2.0;
 
             if (blockWidth > pageWidth * 0.6)
             {
                 // Full-width block: flush column batches, then add this block
-                FlushColumnBatches(result, leftBatch, rightBatch);
+                FlushColumnBatches(result, columnBatches);
                 result.Add(block);
-            }
-            else if (centerX < pageMid)
-            {
-                leftBatch.Add(block);
             }
             else
             {
-                rightBatch.Add(block);
+                // Assign block to its column by center position
+                double blockCenter = (block.MinX + block.MaxX) / 2.0;
+                int col = 0;
+                for (int b = 0; b < layout.Boundaries.Count; b++)
+                {
+                    if (blockCenter > layout.Boundaries[b])
+                    {
+                        col = b + 1;
+                    }
+                }
+
+                col = Math.Min(col, columnBatches.Count - 1);
+                columnBatches[col].Add(block);
             }
         }
 
-        FlushColumnBatches(result, leftBatch, rightBatch);
+        FlushColumnBatches(result, columnBatches);
         return result;
     }
 
     /// <summary>
-    /// Flushes accumulated column blocks into the result: left column first
-    /// (top-to-bottom), then right column (top-to-bottom).
+    /// Flushes accumulated column blocks into the result: columns left-to-right,
+    /// each column top-to-bottom.
     /// </summary>
-    private static void FlushColumnBatches(List<TextBlock> result, List<TextBlock> leftBatch, List<TextBlock> rightBatch)
+    private static void FlushColumnBatches(List<TextBlock> result, List<List<TextBlock>> columnBatches)
     {
         // Batches are already in top-to-bottom order (from the outer loop)
-        result.AddRange(leftBatch);
-        result.AddRange(rightBatch);
-        leftBatch.Clear();
-        rightBatch.Clear();
+        foreach (List<TextBlock> batch in columnBatches)
+        {
+            result.AddRange(batch);
+            batch.Clear();
+        }
     }
 
     /// <summary>
@@ -1251,37 +1393,27 @@ internal sealed partial class PdfMarkdownConverter(ILogger<PdfMarkdownConverter>
     }
 
     /// <summary>
-    /// Calculates an adaptive column gap threshold based on the page’s
-    /// inter-word spacing distribution. Returns a value large enough to
-    /// avoid false positives from justified text but small enough to
-    /// detect narrow column gutters.
+    /// Describes the detected column layout of a single page.
     /// </summary>
-    private static double CalculateAdaptiveColumnGap(List<TextLine> lines)
+    private sealed class ColumnLayout
     {
-        List<double> wordGaps = [];
+        /// <summary>Singleton representing a single-column (no split) layout.</summary>
+        public static ColumnLayout SingleColumn { get; } = new();
 
-        foreach (TextLine line in lines)
-        {
-            for (int w = 1; w < line.Words.Count; w++)
-            {
-                double gap = line.Words[w].BoundingBox.Left - line.Words[w - 1].BoundingBox.Right;
-                if (gap > 0)
-                {
-                    wordGaps.Add(gap);
-                }
-            }
-        }
+        /// <summary>Number of columns detected (1, 2, or 3).</summary>
+        public int ColumnCount { get; init; } = 1;
 
-        if (wordGaps.Count < 10)
-        {
-            return ColumnGapThreshold;
-        }
+        /// <summary>
+        /// X positions at the center of each gap separating columns.
+        /// For 2 columns, contains one boundary. For 3 columns, contains two boundaries.
+        /// Empty for single-column layout.
+        /// </summary>
+        public List<double> Boundaries { get; init; } = [];
 
-        wordGaps.Sort();
-        double median = wordGaps[wordGaps.Count / 2];
-
-        // Use 4× the median word gap, but at least 25pt
-        return Math.Max(median * 4, 25);
+        /// <summary>
+        /// The X extents of each column as (Left, Right) tuples.
+        /// </summary>
+        public List<(double Left, double Right)> ColumnRegions { get; init; } = [];
     }
 
     private static bool IsUnorderedListItem(string lineText)

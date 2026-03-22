@@ -36,6 +36,12 @@ The system must validate all inputs before processing and provide clear, actiona
 10. Error messages must never expose internal implementation details, stack traces, or raw exception messages to the end user.
 11. Internal/unexpected errors must produce a safe, generic message (e.g., "An unexpected error occurred while processing the file") without leaking sensitive information.
 
+### CLI Mode Error Reporting
+12. In CLI mode, all error messages must be written to stderr — stdout is reserved for success output (file paths).
+13. In CLI mode, any validation or runtime error must cause the application to exit with a non-zero exit code.
+14. On success in CLI mode, the application must exit with code `0`.
+15. The same error message text and quality standards apply in both MCP and CLI modes — only the delivery mechanism differs (MCP error response vs. stderr + exit code).
+
 ## Acceptance Criteria
 - [ ] A missing `pdfPath` parameter produces an error: path is required.
 - [ ] A non-existent file path produces an error that includes the path and states the file was not found.
@@ -46,11 +52,14 @@ The system must validate all inputs before processing and provide clear, actiona
 - [ ] A write failure (e.g., read-only directory) produces an error with the specific reason.
 - [ ] No error message contains a raw stack trace or internal exception type.
 - [ ] All error messages include the relevant file path for user reference.
+- [ ] In CLI mode, errors are written to stderr and the process exits with a non-zero exit code.
+- [ ] In CLI mode, successful conversion exits with code `0`.
 
 ## Dependencies
 - **FRD-002** (PDF Conversion Tool Interface) — validation runs as the first step in the tool pipeline.
 - **FRD-003** (PDF Parsing & Direct Markdown Conversion) — some errors (encrypted, no text) are detected during the parsing/conversion pass.
 - **FRD-008** (File Output Management) — write errors are detected during file output.
+- **FRD-011** (CLI Execution Mode) — CLI mode uses stderr and exit codes for error reporting.
 
 ## Notes
 - Validation should follow a fail-fast pattern: check inputs in order and return the first error encountered, rather than collecting all validation errors.

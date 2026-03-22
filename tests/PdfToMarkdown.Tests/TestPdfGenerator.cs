@@ -39,6 +39,8 @@ internal static class TestPdfGenerator
         GenerateTwoColumnWithFullWidthHeader(directory);
         GenerateBoldHeadings(directory);
         GenerateMixedFontHeadings(directory);
+        GenerateThreeColumn(directory);
+        GenerateTwoColumnNarrowGap(directory);
     }
 
     /// <summary>Single page with a title and body text.</summary>
@@ -512,5 +514,53 @@ internal static class TestPdfGenerator
         page.AddText("More body text follows.", 12, new PdfPoint(50, top - 100), bodyFont);
 
         File.WriteAllBytes(Path.Combine(directory, "mixed-font-headings.pdf"), builder.Build());
+    }
+
+    /// <summary>
+    /// Three-column layout: three columns of body text side by side.
+    /// Tests that layout detection handles 3 columns correctly.
+    /// </summary>
+    public static void GenerateThreeColumn(string directory)
+    {
+        PdfDocumentBuilder builder = new();
+        PdfDocumentBuilder.AddedFont regular = builder.AddStandard14Font(Standard14Font.Helvetica);
+
+        PdfPageBuilder page = builder.AddPage(PageSize.A4);
+        double top = page.PageSize.Top - 50;
+
+        // Three columns at X=50, X=220, X=390 with ~20pt gaps between them
+        for (int row = 0; row < 10; row++)
+        {
+            double y = top - (row * 18);
+            page.AddText($"Col1 line {row + 1} text.", 12, new PdfPoint(50, y), regular);
+            page.AddText($"Col2 line {row + 1} text.", 12, new PdfPoint(220, y), regular);
+            page.AddText($"Col3 line {row + 1} text.", 12, new PdfPoint(390, y), regular);
+        }
+
+        File.WriteAllBytes(Path.Combine(directory, "three-column.pdf"), builder.Build());
+    }
+
+    /// <summary>
+    /// Two-column layout with a narrow gap (15pt) between columns.
+    /// Tests that the histogram-based layout detection can detect narrow column gaps
+    /// that the old word-spacing-based approach might miss.
+    /// </summary>
+    public static void GenerateTwoColumnNarrowGap(string directory)
+    {
+        PdfDocumentBuilder builder = new();
+        PdfDocumentBuilder.AddedFont regular = builder.AddStandard14Font(Standard14Font.Helvetica);
+
+        PdfPageBuilder page = builder.AddPage(PageSize.A4);
+        double top = page.PageSize.Top - 50;
+
+        // Left column ends around X=260, right column starts at X=280 (~20pt gap)
+        for (int row = 0; row < 12; row++)
+        {
+            double y = top - (row * 18);
+            page.AddText($"Left col line {row + 1} content here.", 12, new PdfPoint(50, y), regular);
+            page.AddText($"Right col line {row + 1} content there.", 12, new PdfPoint(280, y), regular);
+        }
+
+        File.WriteAllBytes(Path.Combine(directory, "two-column-narrow-gap.pdf"), builder.Build());
     }
 }

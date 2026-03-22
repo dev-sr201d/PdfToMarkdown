@@ -37,6 +37,10 @@ Create the MCP tool class that serves as the entry point for PDF-to-Markdown con
 - `OperationCanceledException` propagates naturally for cancellation.
 - Unexpected exceptions are handled generically by the SDK (no details leaked).
 
+### Relationship to CLI mode
+- In CLI mode (FRD-011 / Task 022), the orchestrator is invoked directly from the CLI entry point — bypassing this MCP tool layer entirely.
+- The tool class is only relevant in MCP server mode. No changes to the tool are needed to support CLI mode.
+
 ### DI registration
 - Register the conversion orchestrator interface and a stub/no-op implementation in `Program.cs` so that the tool can be instantiated and invoked. The stub implementation should throw `NotImplementedException` for all methods — it exists only to satisfy DI until real implementations are provided by FRD-003, FRD-008, FRD-009, and FRD-010.
 - The tool itself does not need explicit DI registration — `WithToolsFromAssembly()` handles tool discovery.

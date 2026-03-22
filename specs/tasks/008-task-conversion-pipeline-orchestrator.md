@@ -7,7 +7,7 @@
 FRD-002 — PDF Conversion Tool Interface
 
 ## Description
-Implement the conversion orchestrator service that coordinates the direct PDF-to-Markdown conversion pipeline. The orchestrator is the single service the MCP tool delegates to. It validates input, initializes the incremental writer, invokes the PDF-to-Markdown converter (which writes through the writer), finalizes the writer, and returns a confirmation message listing all files written.
+Implement the conversion orchestrator service that coordinates the direct PDF-to-Markdown conversion pipeline. The orchestrator is the single service that both the MCP tool (FRD-002 / Task 007) and the CLI entry point (FRD-011 / Task 022) delegate to. It validates input, initializes the incremental writer, invokes the PDF-to-Markdown converter (which writes through the writer), finalizes the writer, and returns a confirmation message listing all files written.
 
 This task supersedes the previous version of Task 008, which described a multi-step pipeline (validate → parse → convert → chunk → write) using an intermediate document model. The new pipeline reflects the direct-conversion architecture from revised FRD-002 and FRD-003.
 
@@ -38,6 +38,7 @@ The orchestrator must execute the following steps in order when invoked:
 ### Service resolution
 - The orchestrator receives all service dependencies via constructor injection.
 - The orchestrator must be registered in DI as the implementation of the orchestrator interface defined in Task 006.
+- The same orchestrator instance/registration is used by both the MCP tool (Task 007) and the CLI entry point (Task 022) — no mode-specific orchestrator variants.
 
 ### Error handling
 - The orchestrator must NOT catch exceptions from downstream services — it lets them propagate to the tool layer where the MCP SDK handles them.

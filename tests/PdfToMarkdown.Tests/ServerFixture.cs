@@ -35,6 +35,16 @@ public sealed class ServerFixture : IAsyncLifetime
         return process;
     }
 
+    /// <summary>
+    /// Starts a server process with extra command-line arguments (for CLI mode testing).
+    /// Does not wait for server-ready state since the process may exit immediately.
+    /// </summary>
+    /// <param name="extraArgs">Additional arguments appended after the assembly path.</param>
+    public Process StartProcessWithArgs(string extraArgs)
+    {
+        return StartServerProcess(_serverAssemblyPath, extraArgs);
+    }
+
     /// <inheritdoc />
     public async Task InitializeAsync()
     {
@@ -77,18 +87,25 @@ public sealed class ServerFixture : IAsyncLifetime
         return assemblyPath;
     }
 
-    private static Process StartServerProcess(string assemblyPath)
+    private static Process StartServerProcess(string assemblyPath, string? extraArgs = null)
     {
+        string arguments = $"\"{assemblyPath}\"";
+        if (!string.IsNullOrEmpty(extraArgs))
+        {
+            arguments += $" {extraArgs}";
+        }
+
         ProcessStartInfo startInfo = new()
         {
             FileName = "dotnet",
-            Arguments = $"\"{assemblyPath}\"",
+            Arguments = arguments,
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = false,
+            RedirectStandardError = true,
             CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
 
         Process process = new() { StartInfo = startInfo };

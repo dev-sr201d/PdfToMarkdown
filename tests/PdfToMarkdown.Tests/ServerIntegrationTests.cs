@@ -86,6 +86,18 @@ public class ServerIntegrationTests(ServerFixture fixture) : IClassFixture<Serve
         process.ExitCode.Should().Be(0, "the server should exit gracefully with code 0");
     }
 
+    [Fact]
+    public async Task Server_WhenArgsProvided_DoesNotBlockAsServer()
+    {
+        using Process process = _fixture.StartProcessWithArgs(@"C:\nonexistent\dummy.pdf");
+
+        bool exited = await WaitForExitAsync(process, TimeSpan.FromSeconds(10));
+        exited.Should().BeTrue(
+            "the process should exit promptly when arguments are provided (CLI mode, not MCP server mode)");
+        process.ExitCode.Should().NotBe(0,
+            "a non-existent file path should cause a non-zero exit code");
+    }
+
     private static async Task<string?> ReadJsonPayloadWithTimeoutAsync(Stream stream, TimeSpan timeout)
     {
         using CancellationTokenSource cts = new(timeout);

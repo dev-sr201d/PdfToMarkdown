@@ -47,3 +47,4 @@ The MCP server must expose a tool callable from Copilot Chat that accepts a PDF 
 - The tool is a thin orchestration layer — all business logic resides in service components defined by other FRDs.
 - The tool does not return converted content in the response; it writes files to disk and returns only a confirmation.
 - There is no intermediate `.parsed.json` file. Parsing and Markdown conversion happen in a single operation.
+- In CLI mode (FRD-011), the same conversion pipeline is invoked directly from the command-line entry point — bypassing the MCP tool layer. The underlying services, validation, and output behavior are identical.

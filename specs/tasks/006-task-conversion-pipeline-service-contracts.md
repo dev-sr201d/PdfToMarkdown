@@ -42,7 +42,7 @@ The following interfaces must be created in the `Services/` directory, one per f
 
    The writer must be initializable with the source PDF path and the chunking mode. It must accept Markdown content incrementally (page-by-page) and flush to disk after each write. It must provide a finalization method that closes all files and returns the list of absolute paths written. Must implement `IAsyncDisposable` for resource cleanup. Corresponds to FRD-008 and FRD-009.
 
-4. **Conversion orchestrator interface** — Accepts a PDF file path, a `chunkByChapter` flag, and a cancellation token. Coordinates the full pipeline (validate → initialize writer → convert with incremental writes → finalize → return confirmation message). This is the single interface the MCP tool delegates to.
+4. **Conversion orchestrator interface** — Accepts a PDF file path, a `chunkByChapter` flag, and a cancellation token. Coordinates the full pipeline (validate → initialize writer → convert with incremental writes → finalize → return confirmation message). This is the single interface that both the MCP tool (FRD-002 / Task 007) and the CLI entry point (FRD-011 / Task 022) delegate to.
 
 ### Stub implementations
 

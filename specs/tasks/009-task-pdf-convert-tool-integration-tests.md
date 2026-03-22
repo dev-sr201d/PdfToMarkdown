@@ -58,7 +58,8 @@ These tests exercise the MCP protocol layer for tool discovery and invocation. T
 - [ ] Tests clean up server processes reliably (no orphaned processes).
 - [ ] Test names follow AGENTS.md naming convention.
 
-## Testing Requirements
+## Notes
 - All tests in this task are themselves the testing deliverable.
 - Tests must be runnable independently and as part of the full test suite.
 - Tests must not depend on external files outside the `TestData/` directory.
+- CLI mode integration tests are covered separately in Task 023. This task covers only MCP tool integration.

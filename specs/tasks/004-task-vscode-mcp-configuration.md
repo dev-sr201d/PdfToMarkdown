@@ -4,10 +4,10 @@
 004
 
 ## Feature
-FRD-001 — MCP Server Hosting & Configuration
+FRD-001 — Application Hosting & Mode Selection
 
 ## Description
-Provide a working VS Code MCP server configuration file so that developers can discover and use the PdfToMarkdown server from GitHub Copilot Chat with minimal setup effort. This directly supports the "5-minute setup" goal from the PRD and the acceptance criterion in FRD-001.
+Provide a working VS Code MCP server configuration file so that developers can discover and use the PdfToMarkdown server from GitHub Copilot Chat with minimal setup effort. This directly supports the "5-minute setup" goal from the PRD and the acceptance criterion in FRD-001. The configuration must launch the application with no extra arguments so that it enters MCP server mode (per the mode-selection logic in Task 003).
 
 ## Dependencies
 - Task 003 (MCP Server Host Bootstrap) — the server must be runnable before the configuration can be verified.
@@ -21,6 +21,7 @@ Provide a working VS Code MCP server configuration file so that developers can d
   - Type: `stdio`
   - Command: `dotnet`
   - Args: `["run", "--project", "src/PdfToMarkdown"]`
+- The args must **not** include any additional arguments beyond the project path — the absence of extra arguments causes the application to start in MCP server mode (per FRD-001 / Task 003).
 
 ### Configuration format
 - Use standard JSON (JSONC comments are acceptable for documentation within the file).
